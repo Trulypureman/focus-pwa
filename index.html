@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Focus"/>
+  <meta name="theme-color" content="#0f0f13"/>
+  <title>Focus — for Yan</title>
+  <link rel="manifest" href="manifest.json"/>
+  <link rel="apple-touch-icon" href="icon-192.png"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="bg-mesh"></div>
+
+  <div class="shell">
+
+    <!-- HEADER -->
+    <header class="hdr">
+      <div class="hdr-left">
+        <img src="icon-192.png" class="avatar" alt=""/>
+        <div class="title-block">
+          <div class="app-name">Focus</div>
+          <div class="app-for">for Yan</div>
+        </div>
+      </div>
+      <div class="hdr-right">
+        <div class="streak-pill" id="streakPill">
+          <span class="streak-fire">🔥</span>
+          <span id="streakCount">0</span>
+          <span class="streak-label">day streak</span>
+        </div>
+        <button class="icon-btn" id="gearBtn" title="Settings">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- SETTINGS DRAWER -->
+    <div class="drawer" id="drawer">
+      <div class="drawer-label">Customize Session</div>
+      <div class="drawer-row">
+        <div class="dfield">
+          <label>Study (min)</label>
+          <input type="number" id="studyMins" value="25" min="1" max="90"/>
+        </div>
+        <div class="dfield">
+          <label>Break (min)</label>
+          <input type="number" id="breakMins" value="5" min="1" max="30"/>
+        </div>
+      </div>
+      <button class="drawer-apply" id="applyBtn">Save Changes</button>
+    </div>
+
+    <!-- TIMER CARD -->
+    <div class="timer-card" id="timerCard">
+      <div class="tc-top">
+        <div class="phase-badge" id="phaseBadge">
+          <span class="phase-dot" id="phaseDot"></span>
+          <span id="phaseLabel">Ready</span>
+        </div>
+        <div class="session-count" id="sessionCount"></div>
+      </div>
+
+      <div class="ring-wrap">
+        <svg class="ring-svg" viewBox="0 0 160 160">
+          <defs>
+            <linearGradient id="gStudy" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#a78bfa"/>
+              <stop offset="100%" stop-color="#60a5fa"/>
+            </linearGradient>
+            <linearGradient id="gBreak" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#34d399"/>
+              <stop offset="100%" stop-color="#60a5fa"/>
+            </linearGradient>
+            <linearGradient id="gDone" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#fbbf24"/>
+              <stop offset="100%" stop-color="#f87171"/>
+            </linearGradient>
+          </defs>
+          <circle class="ring-track" cx="80" cy="80" r="68"/>
+          <circle class="ring-prog" id="ringProg" cx="80" cy="80" r="68"/>
+        </svg>
+        <div class="ring-center">
+          <div class="big-time" id="bigTime">25:00</div>
+          <div class="time-sub" id="timeSub">tap to begin</div>
+        </div>
+      </div>
+
+      <div class="paused-badge" id="pausedBadge">
+        <span>⏸</span> <span>paused · <span id="pCount">0</span> times</span>
+      </div>
+    </div>
+
+    <!-- CONTROLS -->
+    <div class="controls">
+      <button class="btn-main" id="startBtn">Start</button>
+      <button class="btn-secondary" id="endBtn" disabled>End Session</button>
+    </div>
+
+    <!-- STATS ROW -->
+    <div class="stats-row">
+      <div class="stat-box">
+        <div class="stat-val" id="todayVal">0m</div>
+        <div class="stat-lbl">Today</div>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-box">
+        <div class="stat-val" id="totalSessions">0</div>
+        <div class="stat-lbl">Sessions</div>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-box">
+        <div class="stat-val" id="weekVal">0m</div>
+        <div class="stat-lbl">This Week</div>
+      </div>
+    </div>
+
+    <!-- TABS -->
+    <div class="tabs">
+      <button class="tab on" id="tabChart">Chart</button>
+      <button class="tab" id="tabLog">Log</button>
+    </div>
+    <div class="panel" id="panel"></div>
+
+    <footer class="foot">Focus · AhChai Studio · 2025</footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="chart.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
