@@ -1,19 +1,27 @@
 /* ═══════════════════════════════════════
-   Focus — Study Timer v2 (PWA)
+   Focus — Study Timer v3 (Enhanced PWA)
    AhChai Studio · 2025
-   Converted from Chrome Extension to PWA
-   localStorage replaces chrome.storage
+   Enhanced with notifications, keyboard shortcuts,
+   haptics, and improved offline support
 ═══════════════════════════════════════ */
 
 // ── Register Service Worker ──────────────────────
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => console.log('SW registered:', reg.scope))
+      .catch(err => console.log('SW registration failed:', err));
   });
 }
 
 // ── Config & State ───────────────────────────────
-const CFG = { studyMins: 25, breakMins: 5 };
+const CFG = { 
+  studyMins: 25, 
+  breakMins: 5,
+  soundEnabled: true,
+  vibrationEnabled: true,
+  notificationsEnabled: false
+};
 
 let S = {
   mode: 'idle',
@@ -25,6 +33,10 @@ let S = {
   timer: null,
   today: dateStr()
 };
+
+let deferredPrompt = null;
+let chartInst = null;
+let activeTab = 'chart';
 
 // ── Helpers ──────────────────────────────────────
 function dateStr(d = new Date()) { return d.toISOString().slice(0, 10); }
@@ -51,7 +63,14 @@ function toast(msg) {
   _toastTimer = setTimeout(() => el.classList.remove('on'), 2800);
 }
 
+function vibrate(pattern = [50]) {
+  if (CFG.vibrationEnabled && 'vibrate' in navigator) {
+    navigator.vibrate(pattern);
+  }
+}
+
 function bell() {
+  if (!CFG.soundEnabled) return;
   try {
     const ac = new (window.AudioContext || window.webkitAudioContext)();
     [[660, 0], [880, 0.2], [1100, 0.4], [880, 0.7]].forEach(([f, t]) => {
@@ -66,14 +85,42 @@ function bell() {
   } catch (_) {}
 }
 
+async function notify(title, body) {
+  if (!CFG.notificationsEnabled) return;
+  if (!('Notification' in window)) return;
+  
+  if (Notification.permission === 'granted') {
+    try {
+      await navigator.serviceWorker.ready.then(reg => {
+        reg.showNotification(title, {
+          body,
+          icon: './icon-192.png',
+          badge: './icon-192.png',
+          tag: 'focus-timer',
+          requireInteraction: true,
+          actions: [
+            { action: 'dismiss', title: 'Dismiss' }
+          ]
+        });
+      });
+    } catch (e) {
+      // Fallback to regular notification
+      new Notification(title, { body, icon: './icon-192.png' });
+    }
+  }
+}
+
 const $ = id => document.getElementById(id);
 
-// ── Storage (localStorage replaces chrome.storage) ──
+// ── Storage ──────────────────────────────────────
 function getLogs() {
   try {
     const cfg = JSON.parse(localStorage.getItem('focus_cfg') || '{}');
     if (cfg.studyMins) CFG.studyMins = cfg.studyMins;
     if (cfg.breakMins) CFG.breakMins = cfg.breakMins;
+    if (cfg.soundEnabled !== undefined) CFG.soundEnabled = cfg.soundEnabled;
+    if (cfg.vibrationEnabled !== undefined) CFG.vibrationEnabled = cfg.vibrationEnabled;
+    if (cfg.notificationsEnabled !== undefined) CFG.notificationsEnabled = cfg.notificationsEnabled;
     return JSON.parse(localStorage.getItem('focus_logs') || '[]');
   } catch { return []; }
 }
@@ -83,7 +130,15 @@ function setLogs(logs) {
 }
 
 function saveCfg() {
-  try { localStorage.setItem('focus_cfg', JSON.stringify({ studyMins: CFG.studyMins, breakMins: CFG.breakMins })); } catch (_) {}
+  try { 
+    localStorage.setItem('focus_cfg', JSON.stringify({ 
+      studyMins: CFG.studyMins, 
+      breakMins: CFG.breakMins,
+      soundEnabled: CFG.soundEnabled,
+      vibrationEnabled: CFG.vibrationEnabled,
+      notificationsEnabled: CFG.notificationsEnabled
+    })); 
+  } catch (_) {}
 }
 
 // ── Ring ─────────────────────────────────────────
@@ -139,6 +194,11 @@ function render() {
   const idle = S.mode === 'idle' || S.mode === 'done';
   $('endBtn').disabled = idle;
   $('startBtn').textContent = idle ? 'Start' : paused ? 'Resume' : 'Pause';
+  
+  // Update quick action buttons
+  document.querySelectorAll('.quick-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.mins) === CFG.studyMins);
+  });
 }
 
 // ── Tick ─────────────────────────────────────────
@@ -152,13 +212,17 @@ function startTick() {
     if (S.secs <= 0) {
       if (S.mode === 'study') {
         bell();
+        vibrate([100, 50, 100]);
         toast('Study done — break time! 🌿');
+        notify('Study Complete!', 'Time for a break. Great work!');
         S.mode = 'break';
         S.secs = CFG.breakMins * 60;
       } else if (S.mode === 'break') {
         stopTick();
         bell();
+        vibrate([200, 100, 200, 100, 200]);
         toast('Session complete! Great work, Yan 🎉');
+        notify('Session Complete!', 'You\'ve completed a full focus session!');
         commitSession(CFG.studyMins * 60);
         return;
       }
@@ -189,7 +253,7 @@ function commitSession(studied) {
 }
 
 // ── Controls ─────────────────────────────────────
-$('startBtn').addEventListener('click', () => {
+function startSession() {
   if (S.mode === 'idle' || S.mode === 'done') {
     S.mode = 'study';
     S.secs = CFG.studyMins * 60;
@@ -197,6 +261,7 @@ $('startBtn').addEventListener('click', () => {
     S.studiedSecs = 0;
     S.studyStart = Date.now();
     S.today = dateStr();
+    vibrate([30]);
     render();
     startTick();
   } else if (S.mode === 'study' || S.mode === 'break') {
@@ -204,32 +269,67 @@ $('startBtn').addEventListener('click', () => {
     S.mode = 'paused';
     S.pauseCount++;
     stopTick();
+    vibrate([50]);
     render();
   } else if (S.mode === 'paused') {
     S.mode = S.pauseFrom;
+    vibrate([30]);
     render();
     startTick();
   }
-});
+}
+
+$('startBtn').addEventListener('click', startSession);
 
 $('endBtn').addEventListener('click', () => {
   if (S.mode === 'idle' || S.mode === 'done') return;
   stopTick();
   const studied = S.mode === 'break' ? CFG.studyMins * 60 : S.studiedSecs;
   commitSession(studied);
+  vibrate([50]);
   toast('Session saved 💾');
 });
 
+// ── Quick Actions ────────────────────────────────
+document.querySelectorAll('.quick-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (S.mode !== 'idle' && S.mode !== 'done') {
+      toast('End current session first');
+      return;
+    }
+    CFG.studyMins = parseInt(btn.dataset.mins);
+    saveCfg();
+    vibrate([30]);
+    render();
+    toast(`${CFG.studyMins} minutes selected`);
+  });
+});
+
 // ── Settings ─────────────────────────────────────
-$('gearBtn').addEventListener('click', () => {
+function toggleDrawer() {
   const d = $('drawer');
   const open = d.classList.toggle('open');
   $('gearBtn').classList.toggle('open', open);
   if (open) {
     $('studyMins').value = CFG.studyMins;
     $('breakMins').value = CFG.breakMins;
+    updateToggleButtons();
   }
-});
+}
+
+function updateToggleButtons() {
+  const notifyBtn = $('notifyToggle');
+  const vibrateBtn = $('vibrateToggle');
+  
+  notifyBtn.setAttribute('aria-pressed', CFG.notificationsEnabled);
+  notifyBtn.querySelector('.toggle-label').textContent = CFG.notificationsEnabled ? 'On' : 'Off';
+  
+  vibrateBtn.setAttribute('aria-pressed', CFG.vibrationEnabled);
+  vibrateBtn.querySelector('.toggle-label').textContent = CFG.vibrationEnabled ? 'On' : 'Off';
+}
+
+$('gearBtn').addEventListener('click', toggleDrawer);
+
 $('applyBtn').addEventListener('click', () => {
   CFG.studyMins = Math.max(1, Math.min(90, parseInt($('studyMins').value) || 25));
   CFG.breakMins = Math.max(1, Math.min(30, parseInt($('breakMins').value) || 5));
@@ -238,6 +338,45 @@ $('applyBtn').addEventListener('click', () => {
   $('gearBtn').classList.remove('open');
   if (S.mode === 'idle' || S.mode === 'done') render();
   toast(`${CFG.studyMins}m study / ${CFG.breakMins}m break saved ✓`);
+});
+
+// Sound toggle
+$('soundBtn').addEventListener('click', () => {
+  CFG.soundEnabled = !CFG.soundEnabled;
+  $('soundBtn').classList.toggle('muted', !CFG.soundEnabled);
+  saveCfg();
+  toast(CFG.soundEnabled ? 'Sound enabled 🔊' : 'Sound muted 🔇');
+});
+
+// Notification toggle
+$('notifyToggle').addEventListener('click', async () => {
+  if (!CFG.notificationsEnabled) {
+    if (!('Notification' in window)) {
+      toast('Notifications not supported');
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') {
+      CFG.notificationsEnabled = true;
+      toast('Notifications enabled 🔔');
+    } else {
+      toast('Notification permission denied');
+    }
+  } else {
+    CFG.notificationsEnabled = false;
+    toast('Notifications disabled 🔕');
+  }
+  updateToggleButtons();
+  saveCfg();
+});
+
+// Vibration toggle
+$('vibrateToggle').addEventListener('click', () => {
+  CFG.vibrationEnabled = !CFG.vibrationEnabled;
+  if (CFG.vibrationEnabled) vibrate([50]);
+  updateToggleButtons();
+  saveCfg();
+  toast(CFG.vibrationEnabled ? 'Vibration enabled 📳' : 'Vibration disabled');
 });
 
 // ── Stats ─────────────────────────────────────────
@@ -265,13 +404,12 @@ function refreshStats(logs) {
 }
 
 // ── Chart ─────────────────────────────────────────
-let activeTab = 'chart';
-let chartInst = null;
-
 function showChart(logs) {
   activeTab = 'chart';
   $('tabChart').classList.add('on');
+  $('tabChart').setAttribute('aria-selected', 'true');
   $('tabLog').classList.remove('on');
+  $('tabLog').setAttribute('aria-selected', 'false');
 
   const today = new Date();
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -327,7 +465,9 @@ function showChart(logs) {
 function showLog(logs) {
   activeTab = 'log';
   $('tabLog').classList.add('on');
+  $('tabLog').setAttribute('aria-selected', 'true');
   $('tabChart').classList.remove('on');
+  $('tabChart').setAttribute('aria-selected', 'false');
 
   if (!logs.length) {
     $('panel').innerHTML = `<div class="empty-msg">No sessions yet. Start one!</div>`;
@@ -359,11 +499,168 @@ function showLog(logs) {
 $('tabChart').addEventListener('click', () => { const logs = getLogs(); showChart(logs); });
 $('tabLog').addEventListener('click', () => { const logs = getLogs(); showLog(logs); });
 
+// ── PWA Install Prompt ───────────────────────────
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  
+  // Show install banner after 3 seconds if not dismissed before
+  const dismissed = localStorage.getItem('focus_install_dismissed');
+  if (!dismissed) {
+    setTimeout(() => {
+      $('installBanner').classList.add('show');
+    }, 3000);
+  }
+});
+
+$('installBtn').addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  if (outcome === 'accepted') {
+    toast('Focus installed! 🎉');
+    localStorage.setItem('focus_install_dismissed', 'true');
+  }
+  $('installBanner').classList.remove('show');
+  deferredPrompt = null;
+});
+
+$('dismissInstall').addEventListener('click', () => {
+  $('installBanner').classList.remove('show');
+  localStorage.setItem('focus_install_dismissed', 'true');
+});
+
+// ── Network Status ───────────────────────────────
+function updateNetworkStatus() {
+  const status = $('networkStatus');
+  const isOnline = navigator.onLine;
+  
+  status.classList.add('show');
+  status.classList.toggle('offline', !isOnline);
+  status.querySelector('.network-text').textContent = isOnline ? 'Online' : 'Offline';
+  
+  if (!isOnline) {
+    toast('You\'re offline. Timer will still work!');
+  }
+  
+  // Hide after 3 seconds when online
+  if (isOnline) {
+    setTimeout(() => status.classList.remove('show'), 3000);
+  }
+}
+
+window.addEventListener('online', updateNetworkStatus);
+window.addEventListener('offline', updateNetworkStatus);
+
+// ── Keyboard Shortcuts ───────────────────────────
+document.addEventListener('keydown', (e) => {
+  // Ignore if typing in input
+  if (e.target.tagName === 'INPUT') return;
+  
+  switch(e.key) {
+    case ' ':
+      e.preventDefault();
+      startSession();
+      break;
+    case 'e':
+    case 'E':
+      if (S.mode !== 'idle' && S.mode !== 'done') {
+        $('endBtn').click();
+      }
+      break;
+    case 's':
+    case 'S':
+      toggleDrawer();
+      break;
+    case '1':
+      if (S.mode === 'idle' || S.mode === 'done') {
+        CFG.studyMins = 15;
+        saveCfg();
+        render();
+        toast('15 minutes selected');
+      }
+      break;
+    case '2':
+      if (S.mode === 'idle' || S.mode === 'done') {
+        CFG.studyMins = 25;
+        saveCfg();
+        render();
+        toast('25 minutes selected');
+      }
+      break;
+    case '3':
+      if (S.mode === 'idle' || S.mode === 'done') {
+        CFG.studyMins = 45;
+        saveCfg();
+        render();
+        toast('45 minutes selected');
+      }
+      break;
+    case '4':
+      if (S.mode === 'idle' || S.mode === 'done') {
+        CFG.studyMins = 60;
+        saveCfg();
+        render();
+        toast('60 minutes selected');
+      }
+      break;
+    case 'c':
+    case 'C':
+      $('tabChart').click();
+      break;
+    case 'l':
+    case 'L':
+      $('tabLog').click();
+      break;
+    case '?':
+      $('helpPanel').classList.toggle('show');
+      break;
+    case 'Escape':
+      $('drawer').classList.remove('open');
+      $('gearBtn').classList.remove('open');
+      $('helpPanel').classList.remove('show');
+      break;
+  }
+});
+
+// Keyboard help toggle
+$('helpToggle').addEventListener('click', () => {
+  $('helpPanel').classList.toggle('show');
+});
+
+// Close help panel when clicking outside
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.keyboard-help')) {
+    $('helpPanel').classList.remove('show');
+  }
+});
+
+// ── Visibility API (pause when tab hidden) ───────
+document.addEventListener('visibilitychange', () => {
+  // Optional: could pause timer when tab is hidden
+  // Currently keeping timer running for flexibility
+});
+
 // ── Init ─────────────────────────────────────────
 (function init() {
   const logs = getLogs();
   S.secs = CFG.studyMins * 60;
+  
+  // Update sound button state
+  $('soundBtn').classList.toggle('muted', !CFG.soundEnabled);
+  
   render();
   refreshStats(logs);
   showChart(logs);
+  
+  // Check initial network status
+  updateNetworkStatus();
+  
+  // Request notification permission on first load if enabled
+  if (CFG.notificationsEnabled && 'Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+  
+  console.log('🎯 Focus Timer initialized');
+  console.log('⌨️ Press ? for keyboard shortcuts');
 })();
